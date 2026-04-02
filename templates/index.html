@@ -1,0 +1,1135 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AI Chat Interface</title>
+
+  <style>
+    /* =====================================================================
+       RESET & BASE
+       ===================================================================== */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: #f0f2f5;
+      height: 100vh;
+      display: flex;
+      overflow: hidden;
+    }
+
+    /* =====================================================================
+       LAYOUT — CSS Grid: fixed sidebar + flexible chat panel
+       ===================================================================== */
+    #app {
+      display: grid;
+      grid-template-columns: 280px 1fr;
+      width: 100%;
+      height: 100vh;
+    }
+
+    /* =====================================================================
+       LEFT SIDEBAR — document upload + management
+       ===================================================================== */
+    #sidebar {
+      background: #1e1e2e;
+      color: #cdd6f4;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+      padding: 20px 16px;
+      overflow-y: auto;
+      border-right: 1px solid #313244;
+    }
+
+    #sidebar h2 {
+      font-size: 13px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: #a6adc8;
+    }
+
+    /* Upload drop zone */
+    #upload-area {
+      border: 2px dashed #45475a;
+      border-radius: 10px;
+      padding: 20px 12px;
+      text-align: center;
+      cursor: pointer;
+      transition: border-color 0.2s, background 0.2s;
+    }
+    #upload-area:hover,
+    #upload-area.dragging {
+      border-color: #89b4fa;
+      background: rgba(137, 180, 250, 0.06);
+    }
+    #upload-area svg {
+      display: block;
+      margin: 0 auto 8px;
+      opacity: 0.5;
+    }
+    #upload-area span {
+      font-size: 13px;
+      color: #a6adc8;
+      line-height: 1.5;
+    }
+    #file-input { display: none; }
+
+    /* Upload status */
+    #upload-status {
+      font-size: 12px;
+      color: #a6e3a1;
+      min-height: 16px;
+      word-break: break-word;
+    }
+    #upload-status.error { color: #f38ba8; }
+
+    /* Document list */
+    #document-list {
+      list-style: none;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+    #document-list li {
+      background: #313244;
+      border-radius: 8px;
+      padding: 8px 10px;
+      font-size: 12px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    #document-list li .doc-icon { opacity: 0.6; flex-shrink: 0; }
+    #document-list li .doc-name {
+      flex: 1;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      color: #cdd6f4;
+    }
+    #document-list li .doc-chunks {
+      background: #45475a;
+      border-radius: 4px;
+      padding: 1px 5px;
+      font-size: 11px;
+      color: #a6adc8;
+      flex-shrink: 0;
+    }
+
+    #no-docs-hint {
+      font-size: 12px;
+      color: #585b70;
+      font-style: italic;
+      text-align: center;
+      padding: 8px 0;
+    }
+
+    /* Sidebar divider */
+    #sidebar hr {
+      border: none;
+      border-top: 1px solid #313244;
+      margin-top: auto;
+    }
+
+    /* Reset button */
+    #clear-btn {
+      width: 100%;
+      padding: 9px;
+      background: transparent;
+      color: #f38ba8;
+      border: 1px solid #f38ba8;
+      border-radius: 8px;
+      font-size: 13px;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+    #clear-btn:hover { background: rgba(243, 139, 168, 0.1); }
+
+    /* =====================================================================
+       MAIN CHAT PANEL
+       ===================================================================== */
+    #chat-panel {
+      display: flex;
+      flex-direction: column;
+      height: 100vh;
+      background: #f0f2f5;
+    }
+
+    /* Header bar */
+    #chat-header {
+      background: #fff;
+      border-bottom: 1px solid #e4e4e7;
+      padding: 14px 20px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-shrink: 0;
+    }
+    #chat-header .title {
+      font-weight: 600;
+      font-size: 15px;
+      color: #18181b;
+      flex: 1;
+    }
+
+    /* Badges — small status indicators in the header */
+    .badge {
+      font-size: 11px;
+      font-weight: 500;
+      padding: 3px 9px;
+      border-radius: 20px;
+      letter-spacing: 0.03em;
+    }
+    #model-badge {
+      background: #f4f4f5;
+      color: #71717a;
+      border: 1px solid #e4e4e7;
+    }
+    #rag-badge {
+      background: #f4f4f5;
+      color: #71717a;
+      border: 1px solid #e4e4e7;
+      transition: background 0.3s, color 0.3s;
+    }
+    /* RAG active = green when documents are indexed */
+    #rag-badge.active {
+      background: #dcfce7;
+      color: #16a34a;
+      border-color: #bbf7d0;
+    }
+
+    /* =====================================================================
+       MESSAGE THREAD
+       ===================================================================== */
+    #message-thread {
+      flex: 1;
+      overflow-y: auto;
+      padding: 24px 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+
+    /* Empty state */
+    #empty-state {
+      margin: auto;
+      text-align: center;
+      color: #a1a1aa;
+    }
+    #empty-state svg { margin-bottom: 12px; opacity: 0.4; }
+    #empty-state h3 { font-size: 16px; font-weight: 500; color: #71717a; }
+    #empty-state p  { font-size: 13px; margin-top: 4px; }
+
+    /* Individual message bubble */
+    .message {
+      display: flex;
+      flex-direction: column;
+      max-width: 72%;
+    }
+    .message.user   { align-self: flex-end; align-items: flex-end; }
+    .message.assistant { align-self: flex-start; align-items: flex-start; }
+
+    /* Role label above each bubble */
+    .message-role {
+      font-size: 11px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      margin-bottom: 4px;
+      color: #a1a1aa;
+    }
+
+    /* Bubble body */
+    .message-body {
+      padding: 11px 15px;
+      border-radius: 16px;
+      font-size: 14px;
+      line-height: 1.6;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+    .message.user .message-body {
+      background: #2563eb;
+      color: #fff;
+      border-bottom-right-radius: 4px;
+    }
+    .message.assistant .message-body {
+      background: #fff;
+      color: #18181b;
+      border: 1px solid #e4e4e7;
+      border-bottom-left-radius: 4px;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.06);
+    }
+
+    /* Streaming cursor — blinks while the model is still typing */
+    .message.assistant.streaming .message-body::after {
+      content: "▋";
+      display: inline-block;
+      animation: blink 0.8s step-start infinite;
+      margin-left: 2px;
+      color: #a1a1aa;
+    }
+    @keyframes blink { 50% { opacity: 0; } }
+
+    /* =====================================================================
+       TYPING INDICATOR — three bouncing dots while waiting for first token
+       ===================================================================== */
+    #typing-indicator {
+      align-self: flex-start;
+      background: #fff;
+      border: 1px solid #e4e4e7;
+      border-radius: 16px;
+      border-bottom-left-radius: 4px;
+      padding: 12px 16px;
+      display: flex;
+      gap: 5px;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.06);
+    }
+    .dot {
+      width: 7px;
+      height: 7px;
+      background: #a1a1aa;
+      border-radius: 50%;
+      animation: bounce 1.2s ease-in-out infinite;
+    }
+    .dot:nth-child(2) { animation-delay: 0.2s; }
+    .dot:nth-child(3) { animation-delay: 0.4s; }
+    @keyframes bounce {
+      0%, 80%, 100% { transform: translateY(0); }
+      40%           { transform: translateY(-6px); }
+    }
+
+    /* =====================================================================
+       INPUT AREA — auto-resizing textarea + send button
+       ===================================================================== */
+    #input-area {
+      background: #fff;
+      border-top: 1px solid #e4e4e7;
+      padding: 12px 16px;
+      display: flex;
+      align-items: flex-end;
+      gap: 10px;
+      flex-shrink: 0;
+    }
+    #message-input {
+      flex: 1;
+      resize: none;
+      border: 1px solid #e4e4e7;
+      border-radius: 10px;
+      padding: 10px 14px;
+      font-size: 14px;
+      font-family: inherit;
+      line-height: 1.5;
+      max-height: 120px;
+      overflow-y: auto;
+      outline: none;
+      transition: border-color 0.2s;
+      color: #18181b;
+    }
+    #message-input:focus { border-color: #2563eb; }
+    #message-input::placeholder { color: #a1a1aa; }
+
+    #send-btn {
+      padding: 10px 18px;
+      background: #2563eb;
+      color: #fff;
+      border: none;
+      border-radius: 10px;
+      font-size: 14px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: background 0.2s, opacity 0.2s;
+      white-space: nowrap;
+      flex-shrink: 0;
+    }
+    #send-btn:hover:not(:disabled) { background: #1d4ed8; }
+    #send-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+    /* Input hint text */
+    #input-hint {
+      font-size: 11px;
+      color: #a1a1aa;
+      text-align: center;
+      padding-bottom: 6px;
+      flex-basis: 100%;
+    }
+
+    /* =====================================================================
+       IMAGE UPLOAD BUTTON (in input area)
+       ===================================================================== */
+    #img-upload-btn {
+      padding: 10px 12px;
+      background: #f4f4f5;
+      color: #71717a;
+      border: 1px solid #e4e4e7;
+      border-radius: 10px;
+      font-size: 18px;
+      line-height: 1;
+      cursor: pointer;
+      transition: background 0.2s, color 0.2s;
+      flex-shrink: 0;
+    }
+    #img-upload-btn:hover:not(:disabled) { background: #e4e4e7; color: #18181b; }
+    #img-upload-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+    #img-file-input { display: none; }
+
+    /* Image preview shown above the input area */
+    #img-preview-bar {
+      display: none;
+      align-items: center;
+      gap: 10px;
+      padding: 8px 16px;
+      background: #fff;
+      border-top: 1px solid #e4e4e7;
+    }
+    #img-preview-bar img {
+      width: 48px;
+      height: 48px;
+      object-fit: cover;
+      border-radius: 6px;
+      border: 1px solid #e4e4e7;
+    }
+    #img-preview-name {
+      flex: 1;
+      font-size: 12px;
+      color: #71717a;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    #img-preview-cancel {
+      background: none;
+      border: none;
+      color: #a1a1aa;
+      font-size: 16px;
+      cursor: pointer;
+      padding: 2px 6px;
+      border-radius: 4px;
+    }
+    #img-preview-cancel:hover { color: #dc2626; background: #fee2e2; }
+
+    /* Translation result bubble */
+    .translation-bubble .message-body {
+      font-family: inherit;
+      white-space: pre-wrap;
+    }
+    .translation-bubble .tl-section { margin-bottom: 10px; }
+    .translation-bubble .tl-label {
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: #6366f1;
+      margin-bottom: 2px;
+    }
+    .translation-bubble .tl-text { font-size: 14px; line-height: 1.6; color: #18181b; }
+
+    /* =====================================================================
+       SETTINGS SECTION
+       ===================================================================== */
+    #settings-section { display: flex; flex-direction: column; gap: 10px; }
+
+    .setting-row { display: flex; flex-direction: column; gap: 4px; }
+    .setting-label {
+      font-size: 12px;
+      color: #a6adc8;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .setting-val { font-size: 11px; color: #89b4fa; font-weight: 600; }
+
+    #model-select, #max-tokens-input {
+      width: 100%;
+      background: #313244;
+      color: #cdd6f4;
+      border: 1px solid #45475a;
+      border-radius: 6px;
+      padding: 6px 8px;
+      font-size: 12px;
+      cursor: pointer;
+    }
+    #model-select:focus, #max-tokens-input:focus {
+      outline: none;
+      border-color: #89b4fa;
+    }
+    input[type="range"] {
+      width: 100%;
+      accent-color: #89b4fa;
+      cursor: pointer;
+    }
+
+    /* Token usage */
+    .token-usage {
+      font-size: 11px;
+      color: #a6adc8;
+      margin-top: 3px;
+      padding-left: 2px;
+    }
+
+    /* =====================================================================
+       SCROLLBAR styling (Webkit)
+       ===================================================================== */
+    ::-webkit-scrollbar { width: 6px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: #d4d4d8; border-radius: 3px; }
+    ::-webkit-scrollbar-thumb:hover { background: #a1a1aa; }
+  </style>
+</head>
+
+<body>
+<div id="app">
+
+  <!-- ================================================================
+       LEFT SIDEBAR
+       ================================================================ -->
+  <aside id="sidebar">
+
+    <h2>Documents</h2>
+
+    <!-- Drag-and-drop upload zone -->
+    <div id="upload-area">
+      <!-- Upload icon -->
+      <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#89b4fa" stroke-width="1.8"
+           stroke-linecap="round" stroke-linejoin="round">
+        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+        <polyline points="17 8 12 3 7 8"/>
+        <line x1="12" y1="3" x2="12" y2="15"/>
+      </svg>
+      <span>Drop a file or photo here<br/>or <u style="color:#89b4fa;cursor:pointer" id="upload-label-btn">click to upload</u></span>
+      <input type="file" id="file-input" accept=".pdf,.txt,.md,.jpg,.jpeg,.png,.webp" />
+    </div>
+
+    <!-- Upload feedback message -->
+    <div id="upload-status"></div>
+
+    <!-- Indexed documents -->
+    <h2>Indexed Files</h2>
+    <p id="no-docs-hint">No documents yet</p>
+    <ul id="document-list"></ul>
+
+    <hr style="border:none;border-top:1px solid #313244;" />
+
+    <h2>Settings</h2>
+    <div id="settings-section">
+      <div class="setting-row">
+        <label class="setting-label" for="model-select">Model</label>
+        <select id="model-select"></select>
+      </div>
+      <div class="setting-row">
+        <label class="setting-label" for="temp-slider">
+          Temperature <span class="setting-val" id="temp-val">1.0</span>
+        </label>
+        <input type="range" id="temp-slider" min="0" max="2" step="0.1" value="1.0" />
+      </div>
+      <div class="setting-row">
+        <label class="setting-label" for="max-tokens-input">
+          Max Tokens <span style="color:#585b70;font-size:11px">(blank = auto)</span>
+        </label>
+        <input type="number" id="max-tokens-input" placeholder="auto" min="1" max="16000" />
+      </div>
+    </div>
+
+    <hr />
+
+    <button id="clear-btn">Reset Session</button>
+  </aside>
+
+  <!-- ================================================================
+       MAIN CHAT PANEL
+       ================================================================ -->
+  <main id="chat-panel">
+
+    <!-- Header with badges showing current model and RAG status -->
+    <header id="chat-header">
+      <span class="title">AI Chat Interface</span>
+      <span class="badge" id="model-badge">gpt-4.1-mini</span>
+      <span class="badge" id="rag-badge">RAG: off</span>
+    </header>
+
+    <!-- Message thread -->
+    <div id="message-thread">
+      <div id="empty-state">
+        <!-- Chat bubble icon -->
+        <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"
+             stroke-linecap="round" stroke-linejoin="round">
+          <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+        </svg>
+        <h3>Start a conversation</h3>
+        <p>Upload documents to enable RAG, or just chat directly.</p>
+      </div>
+    </div>
+
+    <!-- Typing indicator (hidden by default) -->
+    <div id="typing-indicator" style="display:none; margin: 0 20px 12px;">
+      <span class="dot"></span>
+      <span class="dot"></span>
+      <span class="dot"></span>
+    </div>
+
+    <!-- Image preview bar (shown when an image is selected) -->
+    <div id="img-preview-bar">
+      <img id="img-preview-thumb" src="" alt="preview" />
+      <span id="img-preview-name"></span>
+      <button id="img-preview-cancel" title="Cancel">✕</button>
+    </div>
+
+    <!-- Input area -->
+    <footer id="input-area">
+      <button id="img-upload-btn" title="Upload image for translation">🖼</button>
+      <input type="file" id="img-file-input" accept=".jpg,.jpeg,.png,.webp,.gif" />
+      <textarea
+        id="message-input"
+        rows="1"
+        placeholder="Type a message… (Enter to send, Shift+Enter for new line)"
+      ></textarea>
+      <button id="send-btn">Send</button>
+    </footer>
+
+  </main>
+</div>
+
+<!-- ====================================================================
+     JAVASCRIPT
+     All client-side logic: chat, upload, history restore, SSE reader
+     ==================================================================== -->
+<script>
+  // -----------------------------------------------------------------------
+  // DOM references
+  // -----------------------------------------------------------------------
+  const messageThread   = document.getElementById("message-thread");
+  const messageInput    = document.getElementById("message-input");
+  const sendBtn         = document.getElementById("send-btn");
+  const typingIndicator = document.getElementById("typing-indicator");
+  const uploadArea      = document.getElementById("upload-area");
+  const uploadLabelBtn  = document.getElementById("upload-label-btn");
+  const fileInput       = document.getElementById("file-input");
+  const uploadStatus    = document.getElementById("upload-status");
+  const documentList    = document.getElementById("document-list");
+  const noDocsHint      = document.getElementById("no-docs-hint");
+  const ragBadge        = document.getElementById("rag-badge");
+  const modelBadge      = document.getElementById("model-badge");
+  const clearBtn        = document.getElementById("clear-btn");
+  const emptyState      = document.getElementById("empty-state");
+  const modelSelect     = document.getElementById("model-select");
+  const tempSlider      = document.getElementById("temp-slider");
+  const tempVal         = document.getElementById("temp-val");
+  const maxTokensInput  = document.getElementById("max-tokens-input");
+  const imgUploadBtn    = document.getElementById("img-upload-btn");
+  const imgFileInput    = document.getElementById("img-file-input");
+  const imgPreviewBar   = document.getElementById("img-preview-bar");
+  const imgPreviewThumb = document.getElementById("img-preview-thumb");
+  const imgPreviewName  = document.getElementById("img-preview-name");
+  const imgPreviewCancel= document.getElementById("img-preview-cancel");
+
+  // -----------------------------------------------------------------------
+  // State
+  // -----------------------------------------------------------------------
+  let isStreaming = false;   // prevents sending a new message while one is in progress
+
+  // -----------------------------------------------------------------------
+  // SEND MESSAGE — core chat function
+  // -----------------------------------------------------------------------
+  async function sendMessage() {
+    if (isStreaming) return;
+
+    const text = messageInput.value.trim();
+    if (!text) return;
+
+    // Clear input and reset height
+    messageInput.value = "";
+    messageInput.style.height = "auto";
+
+    // Remove empty-state placeholder
+    if (emptyState) emptyState.remove();
+
+    // Show user bubble
+    appendMessage("user", text);
+
+    // Show typing indicator, lock UI
+    typingIndicator.style.display = "flex";
+    scrollToBottom();
+    isStreaming = true;
+    sendBtn.disabled = true;
+
+    // Create an empty assistant bubble that we'll fill token by token
+    const assistantBubble = appendMessage("assistant", "");
+    assistantBubble.classList.add("streaming");
+    const bodyEl = assistantBubble.querySelector(".message-body");
+
+    try {
+      // POST to /chat — response is an SSE stream
+      const response = await fetch("/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          message:     text,
+          model:       modelSelect.value,
+          temperature: parseFloat(tempSlider.value),
+          max_tokens:  maxTokensInput.value ? parseInt(maxTokensInput.value) : null,
+        }),
+      });
+
+      if (!response.ok) {
+        const err = await response.json().catch(() => ({}));
+        bodyEl.textContent = `Error: ${err.error || response.statusText}`;
+        bodyEl.style.color = "#dc2626";
+        return;
+      }
+
+      // Read the SSE stream manually
+      // (We use fetch + ReadableStream instead of EventSource because
+      //  EventSource only supports GET requests)
+      const reader  = response.body.getReader();
+      const decoder = new TextDecoder();
+      let   buffer  = "";
+
+      typingIndicator.style.display = "none";
+
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+
+        // SSE format: each event is "data: {...}\n\n"
+        // Split on double-newline to get complete events
+        const parts = buffer.split("\n\n");
+        buffer = parts.pop();  // keep incomplete last part in buffer
+
+        for (const part of parts) {
+          const line = part.trim();
+          if (!line.startsWith("data: ")) continue;
+
+          let event;
+          try { event = JSON.parse(line.slice(6)); }
+          catch { continue; }
+
+          if (event.delta) {
+            bodyEl.textContent += event.delta;
+            scrollToBottom();
+          } else if (event.done) {
+            if (event.usage) {
+              const u = event.usage;
+              const usageEl = document.createElement("div");
+              usageEl.className = "token-usage";
+              usageEl.textContent =
+                `${u.total_tokens} tokens (${u.prompt_tokens} prompt + ${u.completion_tokens} response)`;
+              assistantBubble.appendChild(usageEl);
+            }
+            break;
+          } else if (event.error) {
+            bodyEl.textContent = `Error: ${event.error}`;
+            bodyEl.style.color = "#dc2626";
+          }
+        }
+      }
+
+    } catch (err) {
+      typingIndicator.style.display = "none";
+      bodyEl.textContent = `Network error: ${err.message}`;
+      bodyEl.style.color = "#dc2626";
+    } finally {
+      // Always clean up streaming state
+      assistantBubble.classList.remove("streaming");
+      isStreaming = false;
+      sendBtn.disabled = false;
+      messageInput.focus();
+      scrollToBottom();
+    }
+  }
+
+  // -----------------------------------------------------------------------
+  // APPEND MESSAGE — create and insert a message bubble into the thread
+  // -----------------------------------------------------------------------
+  function appendMessage(role, text) {
+    const wrapper = document.createElement("div");
+    wrapper.className = `message ${role}`;
+
+    const roleLabel = document.createElement("div");
+    roleLabel.className = "message-role";
+    roleLabel.textContent = role === "user" ? "You" : "Assistant";
+
+    const body = document.createElement("div");
+    body.className = "message-body";
+    body.textContent = text;
+
+    wrapper.appendChild(roleLabel);
+    wrapper.appendChild(body);
+    messageThread.appendChild(wrapper);
+    scrollToBottom();
+    return wrapper;
+  }
+
+  function scrollToBottom() {
+    messageThread.scrollTop = messageThread.scrollHeight;
+  }
+
+  // -----------------------------------------------------------------------
+  // UPLOAD FILE — send a file to /upload for RAG indexing
+  // -----------------------------------------------------------------------
+  async function uploadFile(file) {
+    // Validate on the client side as well
+    const ext = file.name.split(".").pop().toLowerCase();
+    if (!["pdf", "txt", "md", "jpg", "jpeg", "png", "webp"].includes(ext)) {
+      showUploadStatus(`Unsupported file type: .${ext}`, true);
+      return;
+    }
+
+    const isImage = ["jpg", "jpeg", "png", "webp"].includes(ext);
+    if (isImage) showUploadStatus(`Reading image with vision AI… this may take a moment.`);
+
+    showUploadStatus(`Uploading ${file.name}…`);
+
+    const formData = new FormData();
+    formData.append("file", file);
+
+    try {
+      const response = await fetch("/upload", { method: "POST", body: formData });
+      const result   = await response.json();
+
+      if (result.success) {
+        showUploadStatus(`Indexed ${result.chunks_added} chunks from "${result.filename}"`);
+        await refreshDocumentList();
+      } else {
+        showUploadStatus(result.error || "Upload failed", true);
+      }
+    } catch (err) {
+      showUploadStatus(`Network error: ${err.message}`, true);
+    }
+  }
+
+  function showUploadStatus(msg, isError = false) {
+    uploadStatus.textContent = msg;
+    uploadStatus.className   = isError ? "error" : "";
+  }
+
+  // -----------------------------------------------------------------------
+  // REFRESH DOCUMENT LIST — update sidebar after upload or clear
+  // -----------------------------------------------------------------------
+  async function refreshDocumentList() {
+    try {
+      const response = await fetch("/documents");
+      const docs     = await response.json();
+
+      documentList.innerHTML = "";
+
+      if (docs.length === 0) {
+        noDocsHint.style.display = "block";
+        ragBadge.textContent = "RAG: off";
+        ragBadge.classList.remove("active");
+      } else {
+        noDocsHint.style.display = "none";
+        ragBadge.textContent = `RAG: ${docs.length} doc${docs.length > 1 ? "s" : ""}`;
+        ragBadge.classList.add("active");
+
+        for (const doc of docs) {
+          const li = document.createElement("li");
+
+          // File icon
+          const icon = document.createElement("span");
+          icon.className = "doc-icon";
+          icon.textContent = "📄";
+
+          // Filename
+          const name = document.createElement("span");
+          name.className = "doc-name";
+          name.title = doc.filename;
+          name.textContent = doc.filename;
+
+          // Chunk count badge
+          const badge = document.createElement("span");
+          badge.className = "doc-chunks";
+          badge.textContent = `${doc.chunk_count}`;
+          badge.title = `${doc.chunk_count} chunks indexed`;
+
+          li.appendChild(icon);
+          li.appendChild(name);
+          li.appendChild(badge);
+          documentList.appendChild(li);
+        }
+      }
+    } catch (err) {
+      console.error("Failed to refresh document list:", err);
+    }
+  }
+
+  // -----------------------------------------------------------------------
+  // LOAD HISTORY — restore chat thread on page refresh
+  // -----------------------------------------------------------------------
+  async function loadHistory() {
+    try {
+      const response = await fetch("/history");
+      const history  = await response.json();
+
+      if (history.length > 0) {
+        if (emptyState) emptyState.remove();
+        for (const msg of history) {
+          if (msg.role === "user" || msg.role === "assistant") {
+            appendMessage(msg.role, msg.content);
+          }
+        }
+      }
+    } catch (err) {
+      console.error("Failed to load history:", err);
+    }
+  }
+
+  // -----------------------------------------------------------------------
+  // IMAGE TRANSLATION — upload image to /upload-image, show result in chat
+  // -----------------------------------------------------------------------
+  let pendingImageFile = null;
+
+  imgUploadBtn.addEventListener("click", () => imgFileInput.click());
+
+  imgFileInput.addEventListener("change", () => {
+    const file = imgFileInput.files[0];
+    if (!file) return;
+    imgFileInput.value = "";
+
+    const ext = file.name.split(".").pop().toLowerCase();
+    if (!["jpg", "jpeg", "png", "webp", "gif"].includes(ext)) {
+      alert(`Unsupported image type: .${ext}`);
+      return;
+    }
+
+    // Show preview bar
+    pendingImageFile = file;
+    imgPreviewName.textContent = file.name;
+    const reader = new FileReader();
+    reader.onload = e => { imgPreviewThumb.src = e.target.result; };
+    reader.readAsDataURL(file);
+    imgPreviewBar.style.display = "flex";
+
+    // Auto-submit immediately
+    submitImage(file);
+  });
+
+  imgPreviewCancel.addEventListener("click", () => {
+    pendingImageFile = null;
+    imgPreviewBar.style.display = "none";
+    imgPreviewThumb.src = "";
+    imgPreviewName.textContent = "";
+  });
+
+  async function submitImage(file) {
+    if (isStreaming) return;
+
+    const emptyEl = document.getElementById("empty-state");
+    if (emptyEl) emptyEl.remove();
+
+    // Show user bubble with thumbnail
+    const userWrapper = document.createElement("div");
+    userWrapper.className = "message user";
+    userWrapper.innerHTML = `
+      <div class="message-role">You</div>
+      <div class="message-body" style="padding:8px;">
+        <img src="${imgPreviewThumb.src}" style="max-width:200px;max-height:150px;border-radius:8px;display:block;" />
+        <div style="font-size:12px;color:rgba(255,255,255,0.7);margin-top:4px;">${file.name}</div>
+      </div>`;
+    messageThread.appendChild(userWrapper);
+
+    // Show typing indicator
+    typingIndicator.style.display = "flex";
+    scrollToBottom();
+    isStreaming = true;
+    sendBtn.disabled = true;
+    imgUploadBtn.disabled = true;
+
+    const formData = new FormData();
+    formData.append("file", file);
+
+    try {
+      const response = await fetch("/upload-image", { method: "POST", body: formData });
+      const result   = await response.json();
+
+      typingIndicator.style.display = "none";
+
+      if (!result.success) {
+        appendMessage("assistant", `Error: ${result.error}`);
+        return;
+      }
+
+      // Build structured translation bubble
+      const wrapper = document.createElement("div");
+      wrapper.className = "message assistant translation-bubble";
+
+      const roleLabel = document.createElement("div");
+      roleLabel.className = "message-role";
+      roleLabel.textContent = "Assistant";
+
+      const body = document.createElement("div");
+      body.className = "message-body";
+      body.innerHTML = `
+        <div class="tl-section">
+          <div class="tl-label">Detected Language</div>
+          <div class="tl-text">${escapeHtml(result.detected_language)}</div>
+        </div>
+        <div class="tl-section">
+          <div class="tl-label">Original Text</div>
+          <div class="tl-text">${escapeHtml(result.original_text)}</div>
+        </div>
+        <div class="tl-section">
+          <div class="tl-label">English Translation</div>
+          <div class="tl-text">${escapeHtml(result.translation)}</div>
+        </div>
+        <div style="font-size:11px;color:#a1a1aa;margin-top:8px;">
+          You can now ask follow-up questions about this text.
+        </div>`;
+
+      wrapper.appendChild(roleLabel);
+      wrapper.appendChild(body);
+      messageThread.appendChild(wrapper);
+      scrollToBottom();
+
+    } catch (err) {
+      typingIndicator.style.display = "none";
+      appendMessage("assistant", `Network error: ${err.message}`);
+    } finally {
+      isStreaming = false;
+      sendBtn.disabled = false;
+      imgUploadBtn.disabled = false;
+      imgPreviewBar.style.display = "none";
+      imgPreviewThumb.src = "";
+      pendingImageFile = null;
+      messageInput.focus();
+      scrollToBottom();
+    }
+  }
+
+  function escapeHtml(str) {
+    return String(str)
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;");
+  }
+
+  // -----------------------------------------------------------------------
+  // LOAD MODELS — populate model selector from /models
+  // -----------------------------------------------------------------------
+  async function loadModels() {
+    try {
+      const response = await fetch("/models");
+      const models   = await response.json();
+      modelSelect.innerHTML = "";
+      for (const m of models) {
+        const opt = document.createElement("option");
+        opt.value       = m.id;
+        opt.textContent = m.label;
+        if (m.id === "gpt-4.1-mini") opt.selected = true;
+        modelSelect.appendChild(opt);
+      }
+    } catch (err) {
+      console.error("Failed to load models:", err);
+    }
+  }
+
+  // Update model badge and temperature value display live
+  modelSelect.addEventListener("change", () => {
+    modelBadge.textContent = modelSelect.value;
+  });
+  tempSlider.addEventListener("input", () => {
+    tempVal.textContent = parseFloat(tempSlider.value).toFixed(1);
+  });
+
+  // -----------------------------------------------------------------------
+  // RESET SESSION
+  // -----------------------------------------------------------------------
+  async function clearSession() {
+    if (!confirm("Clear all chat history and indexed documents?")) return;
+
+    try {
+      await fetch("/clear", { method: "POST" });
+    } catch (err) {
+      console.error("Clear failed:", err);
+    }
+
+    // Reset UI
+    messageThread.innerHTML = "";
+    const es = document.createElement("div");
+    es.id = "empty-state";
+    es.innerHTML = `
+      <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"
+           stroke-linecap="round" stroke-linejoin="round">
+        <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+      </svg>
+      <h3>Start a conversation</h3>
+      <p>Upload documents to enable RAG, or just chat directly.</p>`;
+    messageThread.appendChild(es);
+
+    uploadStatus.textContent = "";
+    await refreshDocumentList();
+  }
+
+  // -----------------------------------------------------------------------
+  // AUTO-RESIZE TEXTAREA
+  // Grows as the user types, capped at max-height set in CSS
+  // -----------------------------------------------------------------------
+  messageInput.addEventListener("input", function () {
+    this.style.height = "auto";
+    this.style.height = Math.min(this.scrollHeight, 120) + "px";
+  });
+
+  // -----------------------------------------------------------------------
+  // KEYBOARD SHORTCUTS
+  // Enter = send, Shift+Enter = newline
+  // -----------------------------------------------------------------------
+  messageInput.addEventListener("keydown", function (e) {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      sendMessage();
+    }
+  });
+
+  // -----------------------------------------------------------------------
+  // BUTTON CLICK HANDLERS
+  // -----------------------------------------------------------------------
+  sendBtn.addEventListener("click", sendMessage);
+  clearBtn.addEventListener("click", clearSession);
+
+  // Clicking the underlined "click to upload" text opens the file dialog
+  uploadLabelBtn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    fileInput.click();
+  });
+  uploadArea.addEventListener("click", () => fileInput.click());
+
+  // File input change (user selects via dialog)
+  fileInput.addEventListener("change", () => {
+    if (fileInput.files[0]) {
+      uploadFile(fileInput.files[0]);
+      fileInput.value = "";  // reset so the same file can be re-uploaded
+    }
+  });
+
+  // -----------------------------------------------------------------------
+  // DRAG AND DROP
+  // -----------------------------------------------------------------------
+  uploadArea.addEventListener("dragover", (e) => {
+    e.preventDefault();
+    uploadArea.classList.add("dragging");
+  });
+  uploadArea.addEventListener("dragleave", () => {
+    uploadArea.classList.remove("dragging");
+  });
+  uploadArea.addEventListener("drop", (e) => {
+    e.preventDefault();
+    uploadArea.classList.remove("dragging");
+    const file = e.dataTransfer.files[0];
+    if (file) uploadFile(file);
+  });
+
+  // -----------------------------------------------------------------------
+  // INITIALIZE — load history and document list on page load
+  // -----------------------------------------------------------------------
+  document.addEventListener("DOMContentLoaded", async () => {
+    await Promise.all([loadModels(), loadHistory(), refreshDocumentList()]);
+    messageInput.focus();
+  });
+</script>
+</body>
+</html>
