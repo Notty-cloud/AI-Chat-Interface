@@ -1,0 +1,126 @@
+================================================================
+AI CHAT INTERFACE — DESIGN PROCESS & KEY LEARNINGS
+================================================================
+
+----------------------------------------------------------------
+DESIGN PROCESS
+----------------------------------------------------------------
+
+STARTING POINT
+The goal was a web-based chat interface that could hold a
+conversation, reference uploaded documents, and call the OpenAI
+API efficiently. The architecture decision made early was to keep
+things simple: Flask for the server, a signed session cookie for
+chat history (no database needed), and an in-memory document
+store for RAG. This avoided infrastructure overhead while still
+meeting all requirements.
+
+
+COMPONENT DESIGN
+
+Flask + SSE Streaming
+Rather than waiting for a full response before displaying it,
+the app streams tokens back to the browser via Server-Sent
+Events. This required using fetch + ReadableStream on the
+frontend instead of EventSource, because EventSource only
+supports GET requests and the chat endpoint needs to receive
+a POST body.
+
+Chat History
+History is stored in Flask's signed session cookie — appended
+after each completed stream (not during), so the full assistant
+response is always saved. A hard cap of 20 messages prevents
+the context window from growing unboundedly, which directly
+controls token costs.
+
+RAG Pipeline
+The pipeline was built as a completely independent module
+(rag.py) so it could be reasoned about and tested separately
+from Flask. The five steps — extract, chunk, embed, store,
+retrieve — are discrete functions. The key design choice was
+to embed all chunks from a document in a single batched API
+call rather than one call per chunk, and to skip the embedding
+lookup entirely when no documents are uploaded.
+
+Sentence-Aware Chunking
+The original character-window chunker was replaced with an NLTK
+sentence tokenizer. The motivation was that cosine similarity
+works best when each chunk is a semantically complete unit.
+Splitting at character boundaries produces fragments that hurt
+retrieval quality and waste tokens on partial sentences.
+
+Image Translation
+The /upload-image route uses GPT-4o vision to extract and
+translate text from uploaded images. The image is base64
+encoded before being sent to the API. The translation result
+is saved to session history so users can ask follow-up
+questions in the normal chat input — the model already has
+the translated text as context.
+
+Model & Parameter Controls
+Rather than hardcoding a model, the app exposes a dropdown
+populated from a /models endpoint, plus temperature and
+max_tokens controls. These are validated server-side before
+being passed to the API, so the frontend can never send
+invalid values.
+
+
+----------------------------------------------------------------
+CHALLENGES AND KEY LEARNINGS
+----------------------------------------------------------------
+
+1. THE MODEL'S KNOWLEDGE CUTOFF IS NOT AN ERROR — IT'S A GAP
+   The chatbot giving dates two years behind was not a model
+   quality issue. The model simply has no awareness of the
+   current date unless explicitly told. The fix was injecting
+   date.today() into the system prompt on every request.
+   Key learning: anything the model "should know" but cannot
+   derive from training data (current date, your app's context)
+   must be provided explicitly in the system prompt.
+
+2. STREAMING AND SESSION WRITES DON'T MIX NATURALLY
+   Flask sessions are written when the response is finalized.
+   With SSE streaming, the response never "finalizes" in the
+   traditional sense — the generator keeps yielding. The
+   solution was to save history inside the generator, after
+   the stream completes, by calling session.modified = True
+   explicitly. If you saved before streaming, you would get
+   incomplete history; if you forgot session.modified, Flask
+   would not persist it.
+
+3. RAG RETRIEVAL QUALITY DEPENDS HEAVILY ON CHUNK QUALITY
+   Early testing with character-window chunking produced chunks
+   that started or ended mid-sentence. When these fragments were
+   embedded, the resulting vectors were less representative of
+   the actual content, leading to lower similarity scores and
+   sometimes the wrong chunks being retrieved. Sentence-aware
+   chunking fixed this — the retrieval relevance improved
+   because the embeddings now represent complete thoughts.
+
+4. TOKEN EFFICIENCY REQUIRES DELIBERATE DECISIONS AT EVERY LAYER
+   Token costs compound: a long system prompt + large history +
+   many RAG chunks can push a simple question to thousands of
+   tokens. The design addresses this at three levels — trimming
+   history to 20 messages, injecting only the top-3 RAG chunks,
+   and using text-embedding-3-small (the cheapest embedding
+   model) rather than a larger one. The token usage display in
+   the UI makes this visible so you can observe the tradeoffs
+   in real time.
+
+5. SECURITY DEFAULTS MATTER FROM THE START
+   The .env / .gitignore setup and the MAX_CONTENT_LENGTH upload
+   limit were built in from the beginning, not added later. API
+   keys committed to git and unrestricted file uploads are among
+   the most common and damaging mistakes in student projects.
+   Building the secure pattern first means you never have to
+   retrofit it.
+
+6. BROWSER CACHING CAN MASK SUCCESSFUL CODE CHANGES
+   After adding image support, the app was reporting "Unsupported
+   file type: .jpg" even though the code was correct on both the
+   server and client. The browser was running a cached old version
+   of the page. A hard refresh (Ctrl+Shift+R) resolved it.
+   Key learning: always hard refresh when testing frontend changes,
+   especially when validation logic is involved.
+
+================================================================
