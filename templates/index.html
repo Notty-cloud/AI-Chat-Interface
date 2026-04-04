@@ -470,6 +470,26 @@
       padding-left: 2px;
     }
 
+    /* Agent routing metadata */
+    .agent-meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 5px;
+      margin-top: 5px;
+      padding-left: 2px;
+    }
+    .agent-tag {
+      font-size: 10px;
+      font-weight: 600;
+      padding: 2px 7px;
+      border-radius: 20px;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+    }
+    .tag-rag        { background: #dbeafe; color: #1d4ed8; }
+    .tag-web        { background: #fef9c3; color: #854d0e; }
+    .tag-class      { background: #f3f4f6; color: #6b7280; border: 1px solid #e5e7eb; }
+
     /* =====================================================================
        SCROLLBAR styling (Webkit)
        ===================================================================== */
@@ -712,6 +732,7 @@
             bodyEl.textContent += event.delta;
             scrollToBottom();
           } else if (event.done) {
+            // Token usage
             if (event.usage) {
               const u = event.usage;
               const usageEl = document.createElement("div");
@@ -720,6 +741,24 @@
                 `${u.total_tokens} tokens (${u.prompt_tokens} prompt + ${u.completion_tokens} response)`;
               assistantBubble.appendChild(usageEl);
             }
+            // Agent routing badges
+            const metaEl = document.createElement("div");
+            metaEl.className = "agent-meta";
+            // Classification tag
+            if (event.classification) {
+              const cls = document.createElement("span");
+              cls.className = "agent-tag tag-class";
+              cls.textContent = event.classification.replace(/_/g, " ");
+              metaEl.appendChild(cls);
+            }
+            // Tool tags
+            (event.tools_used || []).forEach(tool => {
+              const t = document.createElement("span");
+              t.className = `agent-tag ${tool === "rag" ? "tag-rag" : "tag-web"}`;
+              t.textContent = tool === "rag" ? "RAG" : "Web Search";
+              metaEl.appendChild(t);
+            });
+            if (metaEl.children.length) assistantBubble.appendChild(metaEl);
             break;
           } else if (event.error) {
             bodyEl.textContent = `Error: ${event.error}`;

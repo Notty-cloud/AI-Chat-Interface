@@ -26,6 +26,7 @@ from flask import (Flask, Response, jsonify, render_template,
                    request, session, stream_with_context)
 from openai import APIConnectionError, APIError, AuthenticationError, OpenAI, RateLimitError
 
+import agent
 import rag
 
 # ---------------------------------------------------------------------------
@@ -85,46 +86,45 @@ def get_system_prompt_base() -> str:
 # ---------------------------------------------------------------------------
 # Helper — Build the messages list for each API call
 # ---------------------------------------------------------------------------
-def build_messages(user_message: str) -> list[dict]:
+def build_messages(user_message: str, routing_ctx: dict) -> list[dict]:
     """
     Assemble the full messages list to send to the chat completions API.
 
     Structure:
       [system_message, ...trimmed_history..., new_user_message]
 
-    Why rebuild the system message each time?
-      The RAG context is query-specific — different queries retrieve different chunks.
-      Rebuilding fresh ensures the model always sees the most relevant context
-      for THIS question, not the context from the previous turn.
-
-    Why not store the system message in session history?
-      It would either contain stale context or require scanning the history list
-      to find and update it. Rebuilding is simpler and always correct.
+    The system message is built fresh each request and may include:
+      - RAG context (<context> block) when internal docs are relevant
+      - Web search results (<web_search> block) when web fallback was triggered
     """
-    # 1. Retrieve relevant document chunks for this query
-    chunks = rag.retrieve_relevant_chunks(user_message, client)
-    context_block = rag.build_context_block(chunks)
-
-    # 2. Build the system message (with or without RAG context)
     base = get_system_prompt_base()
+
+    # 1. Inject RAG context if available
+    rag_chunks    = routing_ctx.get("rag_chunks", [])
+    context_block = rag.build_context_block(rag_chunks)
+
+    # 2. Inject web search context if available
+    web_context = routing_ctx.get("web_context", "")
+
+    system_content = base
     if context_block:
-        system_content = f"{base}\n\n<context>\n{context_block}\n</context>"
-    else:
-        system_content = base
+        system_content += f"\n\n<context>\n{context_block}\n</context>"
+    if web_context:
+        system_content += (
+            f"\n\n<web_search>\nThe following results were retrieved from a live web search. "
+            f"Use them to supplement your answer and cite the source URLs where relevant.\n"
+            f"{web_context}\n</web_search>"
+        )
 
     system_message = {"role": "system", "content": system_content}
 
-    # 3. Get stored history (user + assistant turns only — no system messages)
+    # 3. Get stored history, trim to cap
     history = session.get("history", [])
-
-    # 4. Trim to keep only the most recent MAX_HISTORY_MESSAGES messages
-    #    This prevents the context window from growing unboundedly
     if len(history) > MAX_HISTORY_MESSAGES:
         history = history[-MAX_HISTORY_MESSAGES:]
 
-    # 5. Assemble: system + history + new user message
-    messages = [system_message] + history + [{"role": "user", "content": user_message}]
-    return messages
+    # 4. Assemble: system + history + new user message
+    return [system_message] + history + [{"role": "user", "content": user_message}]
 
 
 # ---------------------------------------------------------------------------
@@ -185,7 +185,10 @@ def chat():
         except (TypeError, ValueError):
             max_tokens = None
 
-    messages = build_messages(user_message)
+    # Run the decision tree: classify → select tools → retrieve context
+    rag_chunks  = rag.retrieve_relevant_chunks(user_message, client)
+    routing_ctx = agent.route_request(user_message, rag_chunks, client)
+    messages    = build_messages(user_message, routing_ctx)
 
     def generate():
         """Generator that yields SSE-formatted chunks as they stream from OpenAI."""
@@ -219,8 +222,12 @@ def chat():
                     payload = json.dumps({"delta": delta.content})
                     yield f"data: {payload}\n\n"
 
-            # Signal that streaming is complete, include token usage
-            done_payload = {"done": True}
+            # Signal that streaming is complete
+            done_payload = {
+                "done":           True,
+                "classification": routing_ctx.get("classification", "general_inquiry"),
+                "tools_used":     routing_ctx.get("tools_used", []),
+            }
             if usage_data:
                 done_payload["usage"] = usage_data
             yield f"data: {json.dumps(done_payload)}\n\n"
