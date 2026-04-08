@@ -73,15 +73,18 @@ def extract_text_from_image(file_bytes: bytes, ext: str, client: OpenAI) -> str:
                 {
                     "type": "text",
                     "text": (
-                        "Extract all text visible in this image. "
-                        "If the text is not in English, translate it to English. "
+                        "Extract EVERY piece of text visible in this image — including "
+                        "headlines, body text, captions, footnotes, labels, watermarks, "
+                        "small print, dates, numbers, and any text regardless of font size or position. "
+                        "Do NOT skip text because it is small, faint, or in a corner. "
+                        "If the text is not in English, translate it all to English, preserving structure. "
                         "Return only the extracted (and translated) text — no commentary, "
                         "no labels, no explanations."
                     ),
                 },
             ],
         }],
-        max_tokens=2000,
+        max_tokens=4000,
     )
     return response.choices[0].message.content.strip()
 

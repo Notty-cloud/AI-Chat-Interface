@@ -27,6 +27,7 @@ from flask import (Flask, Response, jsonify, render_template,
 from openai import APIConnectionError, APIError, AuthenticationError, OpenAI, RateLimitError
 
 import agent
+from agent import build_web_context
 import rag
 
 # ---------------------------------------------------------------------------
@@ -65,22 +66,37 @@ IMAGE_MIME_TYPES         = {
 IMAGE_MAX_BYTES          = 20 * 1024 * 1024   # 20 MB for vision uploads
 VISION_MODEL             = "gpt-4o"
 
-def get_system_prompt_base() -> str:
+TRANSLATION_KEYWORDS = {
+    "translat", "language", "english", "spanish", "french", "arabic",
+    "japanese", "chinese", "portuguese", "german", "hindi", "korean",
+    "what does", "what is this", "what does this say", "what does this mean",
+}
+
+def get_system_prompt_base(user_message: str = "") -> str:
+    """
+    Build the system prompt, injecting translation instructions only when
+    the query appears to be translation-related. Saves ~40 tokens per
+    non-translation message.
+    """
     today = date.today().strftime("%B %d, %Y")
-    return (
+    base = (
         f"You are a helpful AI assistant. Today's date is {today}. "
         "Answer the user's questions clearly and concisely. "
         "When relevant document context is provided between <context> tags, "
         "use it to inform your answer and cite the document filename when you reference it. "
-        "If the context doesn't help with the question, answer from your own knowledge. "
-        # Translation instructions added below
-        "You are also a multilingual translation assistant. "
-        "When the user asks for a translation: "
-        "automatically detect the source language if not specified, "
-        "preserve the original tone and formality level, "
-        "and return only the translated text unless the user asks for explanation. "
-        "If a language or dialect is not supported, say so clearly rather than guessing."
+        "If the context doesn't help with the question, answer from your own knowledge."
     )
+    # Only add translation instructions when the query needs them
+    msg_lower = user_message.lower()
+    if any(kw in msg_lower for kw in TRANSLATION_KEYWORDS):
+        base += (
+            " You are also a multilingual translation assistant. "
+            "When the user asks for a translation: "
+            "automatically detect the source language if not specified, "
+            "preserve the original tone and formality level, "
+            "and return only the translated text unless the user asks for explanation."
+        )
+    return base
 
 
 # ---------------------------------------------------------------------------
@@ -97,14 +113,15 @@ def build_messages(user_message: str, routing_ctx: dict) -> list[dict]:
       - RAG context (<context> block) when internal docs are relevant
       - Web search results (<web_search> block) when web fallback was triggered
     """
-    base = get_system_prompt_base()
+    base = get_system_prompt_base(user_message)
 
     # 1. Inject RAG context if available
     rag_chunks    = routing_ctx.get("rag_chunks", [])
     context_block = rag.build_context_block(rag_chunks)
 
-    # 2. Inject web search context if available
-    web_context = routing_ctx.get("web_context", "")
+    # 2. Inject web search context — cap at 2 results to limit tokens
+    web_results = routing_ctx.get("web_results", [])[:2]
+    web_context = build_web_context(web_results)
 
     system_content = base
     if context_block:
@@ -185,8 +202,13 @@ def chat():
         except (TypeError, ValueError):
             max_tokens = None
 
+    # Fix 2: scale RAG top_k with query complexity
+    # Short queries (< 60 chars) need at most 1 chunk; longer queries up to 3
+    word_count = len(user_message.split())
+    top_k = 1 if word_count <= 8 else (2 if word_count <= 20 else 3)
+
     # Run the decision tree: classify → select tools → retrieve context
-    rag_chunks  = rag.retrieve_relevant_chunks(user_message, client)
+    rag_chunks  = rag.retrieve_relevant_chunks(user_message, client, top_k=top_k)
     routing_ctx = agent.route_request(user_message, rag_chunks, client)
     messages    = build_messages(user_message, routing_ctx)
 
@@ -246,14 +268,48 @@ def chat():
             return
 
         # Save the completed exchange to session history
-        # (done here, after streaming, so we have the full assistant response)
-        history = session.get("history", [])
-        history.append({"role": "user", "content": user_message})
-        history.append({"role": "assistant", "content": "".join(full_response)})
+        full_text = "".join(full_response)
+        history   = session.get("history", [])
+        history.append({"role": "user",      "content": user_message})
+        history.append({"role": "assistant", "content": full_text})
 
-        # Trim history if needed
+        # Fix 4: when history exceeds the cap, summarise the oldest half
+        # into a single compact assistant message instead of just dropping it.
+        # This preserves context while dramatically reducing token count.
         if len(history) > MAX_HISTORY_MESSAGES:
-            history = history[-MAX_HISTORY_MESSAGES:]
+            half       = len(history) // 2
+            to_summarise = history[:half]
+            recent       = history[half:]
+            try:
+                summary_resp = client.chat.completions.create(
+                    model="gpt-4.1-mini",
+                    messages=[
+                        {
+                            "role": "system",
+                            "content": (
+                                "Summarise the following conversation in 3-5 sentences, "
+                                "preserving all key facts, decisions, and topics discussed. "
+                                "Be concise — this summary replaces the full history to save tokens."
+                            ),
+                        },
+                        {
+                            "role": "user",
+                            "content": "\n".join(
+                                f"{m['role'].upper()}: {m['content']}"
+                                for m in to_summarise
+                            ),
+                        },
+                    ],
+                    max_tokens=200,
+                    temperature=0,
+                )
+                summary_text = summary_resp.choices[0].message.content.strip()
+                history = [
+                    {"role": "assistant", "content": f"[Earlier conversation summary]: {summary_text}"}
+                ] + recent
+            except Exception:
+                # If summarisation fails, fall back to simple trim
+                history = history[-MAX_HISTORY_MESSAGES:]
 
         session["history"] = history
         session.modified = True
@@ -361,19 +417,22 @@ def upload_image():
                         "type": "text",
                         "text": (
                             "Examine this image and do the following:\n"
-                            "1. Extract ALL visible text from the image.\n"
+                            "1. Extract EVERY piece of text visible in the image — including "
+                            "headlines, body text, captions, footnotes, labels, watermarks, "
+                            "small print, dates, numbers, and any text regardless of font size or position.\n"
+                            "Do NOT skip text because it is small, faint, or in a corner.\n"
                             "2. Detect what language the text is written in.\n"
-                            "3. Translate the text to English.\n\n"
+                            "3. Translate ALL extracted text to English, preserving the original structure.\n\n"
                             "Respond in exactly this format (keep the labels):\n"
                             "Detected language: <language name>\n"
-                            "Original text: <extracted text>\n"
-                            "English translation: <translated text>\n\n"
+                            "Original text: <all extracted text, preserving layout>\n"
+                            "English translation: <full translation of all extracted text>\n\n"
                             "If there is no text in the image, say so clearly in each field."
                         ),
                     },
                 ],
             }],
-            max_tokens=2000,
+            max_tokens=4000,
         )
     except AuthenticationError:
         return jsonify({"success": False, "error": "Invalid API key."}), 401
@@ -386,15 +445,31 @@ def upload_image():
 
     raw = response.choices[0].message.content.strip()
 
-    # Parse the structured response
-    def extract_field(label, text):
-        for line in text.splitlines():
-            if line.lower().startswith(label.lower()):
-                return line.split(":", 1)[-1].strip()
-        return ""
+    # Parse the structured response — each field may span multiple lines.
+    # We find where each label starts and capture everything up to the next label.
+    def extract_field(label, text, next_labels=None):
+        lines = text.splitlines()
+        result_lines = []
+        inside = False
+        for line in lines:
+            if line.lower().startswith(label.lower() + ":"):
+                inside = True
+                # Capture any text on the same line as the label
+                after_colon = line.split(":", 1)[-1].strip()
+                if after_colon:
+                    result_lines.append(after_colon)
+                continue
+            if inside:
+                # Stop when we hit the next label
+                if next_labels and any(line.lower().startswith(nl.lower() + ":") for nl in next_labels):
+                    break
+                result_lines.append(line)
+        return "\n".join(result_lines).strip()
 
-    detected_language = extract_field("Detected language", raw)
-    original_text     = extract_field("Original text", raw)
+    detected_language = extract_field("Detected language", raw,
+                                      next_labels=["Original text", "English translation"])
+    original_text     = extract_field("Original text", raw,
+                                      next_labels=["English translation"])
     translation       = extract_field("English translation", raw)
 
     # Save to session history so follow-up chat questions have context

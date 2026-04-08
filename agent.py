@@ -60,7 +60,9 @@ def classify_query(query: str, client: OpenAI) -> str:
                         "Categories:\n"
                         "- course_career_advice : courses, skills, career paths, job market\n"
                         "- platform_feature     : app features, compatibility, how-to guides\n"
-                        "- external_research    : market analysis, industry trends, current news\n"
+                        "- external_research    : market analysis, industry trends, current news, "
+                        "elections, politics, sports results, weather, prices, recent events, "
+                        "anything that changes over time or requires up-to-date information\n"
                         "- policy_lookup        : rules, policies, procedures, terms of service\n"
                         "- general_inquiry      : anything else"
                     ),
