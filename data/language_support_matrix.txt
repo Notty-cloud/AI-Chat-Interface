@@ -1,0 +1,117 @@
+LANGUAGE SUPPORT MATRIX
+AI Chat Interface — Supported Languages and Capabilities
+Version 1.4 | Last Updated: April 2026
+
+================================================================
+HOW TO READ THIS MATRIX
+================================================================
+Chat Translation  : Can translate text typed directly into chat
+Image Extraction  : Can extract text from uploaded images
+RAG Indexing      : Can index documents written in this language
+Voice (Planned)   : Planned for future Whisper API integration
+Confidence Level  : High / Medium / Low (based on model training)
+
+================================================================
+TIER 1 — FULL SUPPORT (High Confidence)
+================================================================
+
+Language        | Chat | Image | RAG  | Voice    | Notes
+----------------|------|-------|------|----------|----------------------
+English         | Yes  | Yes   | Yes  | Planned  | Primary language
+Spanish         | Yes  | Yes   | Yes  | Planned  | Castilian + Latin Am.
+French          | Yes  | Yes   | Yes  | Planned  | Includes Canadian
+German          | Yes  | Yes   | Yes  | Planned  |
+Portuguese      | Yes  | Yes   | Yes  | Planned  | Brazil + European
+Italian         | Yes  | Yes   | Yes  | Planned  |
+Dutch           | Yes  | Yes   | Yes  | Planned  |
+Polish          | Yes  | Yes   | Yes  | Planned  |
+Russian         | Yes  | Yes   | Yes  | Planned  |
+Japanese        | Yes  | Yes   | Yes  | Planned  | Hiragana/Katakana/Kanji
+Chinese (Simp.) | Yes  | Yes   | Yes  | Planned  | Simplified script
+Chinese (Trad.) | Yes  | Yes   | Yes  | Planned  | Traditional script
+Arabic          | Yes  | Yes   | Yes  | Planned  | MSA + major dialects
+Korean          | Yes  | Yes   | Yes  | Planned  |
+Hindi           | Yes  | Yes   | Yes  | Planned  |
+
+================================================================
+TIER 2 — PARTIAL SUPPORT (Medium Confidence)
+================================================================
+
+Language        | Chat | Image | RAG  | Voice    | Notes
+----------------|------|-------|------|----------|----------------------
+Turkish         | Yes  | Yes   | Yes  | Planned  |
+Vietnamese      | Yes  | Yes   | Yes  | Planned  |
+Thai            | Yes  | Yes   | No   | Planned  | RAG chunking limited
+Hebrew          | Yes  | Yes   | No   | Planned  | RTL; RAG limited
+Greek           | Yes  | Yes   | Yes  | Planned  |
+Swedish         | Yes  | Yes   | Yes  | Planned  |
+Norwegian       | Yes  | Yes   | Yes  | Planned  |
+Danish          | Yes  | Yes   | Yes  | Planned  |
+Finnish         | Yes  | Yes   | Yes  | Planned  |
+Czech           | Yes  | Yes   | Yes  | Planned  |
+Hungarian       | Yes  | Yes   | Yes  | Planned  |
+Romanian        | Yes  | Yes   | Yes  | Planned  |
+Indonesian      | Yes  | Yes   | Yes  | Planned  |
+Malay           | Yes  | Yes   | Yes  | Planned  |
+Tagalog         | Yes  | Yes   | Yes  | Planned  |
+Swahili         | Yes  | Yes   | Yes  | Planned  |
+
+================================================================
+TIER 3 — EXPERIMENTAL (Low Confidence)
+================================================================
+
+Language        | Chat | Image | RAG  | Notes
+----------------|------|-------|------|----------------------------------
+Urdu            | Yes  | Yes   | No   | RTL; similar to Hindi/Arabic mix
+Bengali         | Yes  | Yes   | No   |
+Tamil           | Yes  | Yes   | No   |
+Punjabi         | Yes  | Yes   | No   |
+Amharic         | Yes  | Yes   | No   | Ethiopic script
+Georgian        | Yes  | Yes   | No   | Unique script
+Armenian        | Yes  | Yes   | No   |
+Khmer           | Yes  | Yes   | No   | Cambodian
+Lao             | Yes  | Yes   | No   |
+Burmese         | Yes  | Yes   | No   |
+Sinhala         | Yes  | Yes   | No   |
+Haitian Creole  | Yes  | Yes   | Yes  |
+Caribbean Creole| Yes  | Yes   | Yes  | Bajan, Trinidadian, Jamaican
+
+================================================================
+KNOWN LIMITATIONS
+================================================================
+
+1. Handwriting
+   Handwritten text in images is supported but accuracy depends
+   heavily on legibility. Print handwriting is better than cursive.
+   Estimated accuracy: 70-85% for clear handwriting.
+
+2. Archaic or Classical Languages
+   Old English, Latin, Classical Arabic, Classical Chinese, and
+   Ancient Greek can be translated but confidence is reduced.
+   Always validate with a subject matter expert.
+
+3. Technical and Domain-Specific Jargon
+   Medical, legal, and engineering terminology may be translated
+   literally rather than using domain-standard equivalents.
+   Flag these translations for expert review.
+
+4. Dialects and Regional Variants
+   The model may not reliably distinguish between regional dialects
+   (e.g. Moroccan Darija vs. Egyptian Arabic, Rioplatense Spanish
+   vs. Mexican Spanish). The output will note uncertainty.
+
+5. Mixed-Script Documents
+   Documents mixing multiple scripts (e.g. Japanese with English
+   loanwords in Katakana) are handled correctly by the vision
+   model but may require post-processing for formatting.
+
+================================================================
+UPCOMING LANGUAGE ADDITIONS (Roadmap)
+================================================================
+
+- Zulu and Xhosa (South African languages) — Q3 2026
+- Yoruba and Igbo (West African languages) — Q3 2026
+- Pashto and Dari (Afghanistan) — Q4 2026
+- Voice input via OpenAI Whisper API — Q2 2026 (all Tier 1 languages)
+
+================================================================

@@ -18,8 +18,10 @@ Architecture notes:
 
 import base64
 import json
+import logging
 import os
 from datetime import date
+from pathlib import Path
 
 from dotenv import load_dotenv
 from flask import (Flask, Response, jsonify, render_template,
@@ -39,7 +41,27 @@ app = Flask(__name__)
 app.secret_key = os.environ.get("FLASK_SECRET_KEY", "dev-secret-change-me")
 app.config["MAX_CONTENT_LENGTH"] = 10 * 1024 * 1024  # 10 MB upload limit
 
+logger = logging.getLogger(__name__)
 client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
+
+
+def preload_business_context():
+    """
+    Auto-index all .txt and .md files in the data/ folder into the RAG
+    pipeline at startup. This gives the agent permanent access to the
+    translation style guide, language support matrix, usage policy, and
+    performance metrics without requiring manual uploads each session.
+    """
+    data_dir = Path(__file__).parent / "data"
+    if not data_dir.exists():
+        return
+    for path in sorted(data_dir.glob("*.txt")) :
+        try:
+            file_bytes = path.read_bytes()
+            result = rag.add_document(file_bytes, path.name, client)
+            logger.info("Preloaded '%s' — %d chunks", path.name, result["chunks_added"])
+        except Exception as e:
+            logger.warning("Failed to preload '%s': %s", path.name, e)
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -530,6 +552,8 @@ def clear():
 # Entry point
 # ---------------------------------------------------------------------------
 if __name__ == "__main__":
+    logging.basicConfig(level=logging.INFO)
+    preload_business_context()
     # debug=True enables auto-reload on code changes during development
     # Never use debug=True in production
     app.run(debug=True, port=5000)

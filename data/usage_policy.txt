@@ -1,0 +1,118 @@
+ACCEPTABLE USE POLICY
+AI Chat Interface — Language Translation Service
+Version 1.0 | Effective: January 2026
+
+================================================================
+1. PURPOSE
+================================================================
+This policy defines acceptable and prohibited uses of the AI Chat
+Interface translation and document Q&A service. All users are
+required to comply with this policy when using the platform.
+
+================================================================
+2. PERMITTED USES
+================================================================
+
+2.1 Personal Translation
+Users may translate personal documents, messages, images, and
+web content for their own understanding and use.
+
+2.2 Academic and Research Use
+Translation of academic papers, research materials, and
+educational content for study or research purposes is permitted.
+
+2.3 Business Communications
+Translation of business correspondence, contracts, product
+information, and internal documents for professional use is
+permitted, provided the user has the right to process the content.
+
+2.4 Document Indexing (RAG)
+Users may upload documents to the RAG pipeline for Q&A purposes.
+Uploaded documents are stored in memory only for the duration of
+the session and are not retained after the session ends.
+
+2.5 News and Public Information
+Translation of publicly available news articles, government
+announcements, and publicly accessible web content is permitted.
+
+================================================================
+3. PROHIBITED USES
+================================================================
+
+3.1 Hate Speech and Harmful Content
+The service must not be used to translate, generate, or distribute
+content that:
+- Incites violence or hatred against individuals or groups
+- Promotes discrimination based on race, religion, gender,
+  nationality, disability, or sexual orientation
+- Constitutes harassment or targeted abuse
+
+3.2 Confidential Third-Party Content
+Users must not upload or submit content that:
+- Belongs to a third party without their explicit consent
+- Is subject to a non-disclosure agreement
+- Contains trade secrets or proprietary business information
+  of another organisation
+
+3.3 Personal Data
+Users should not submit content containing sensitive personal
+data of third parties (e.g. medical records, financial statements,
+identity documents) unless they have lawful authority to process
+that data and take full responsibility for compliance with
+applicable data protection laws.
+
+3.4 Illegal Content
+Translation or processing of content that is illegal in the user's
+jurisdiction is strictly prohibited, including but not limited to:
+- Content that infringes intellectual property rights
+- Material that facilitates fraud or financial crime
+- Content prohibited under applicable export control regulations
+
+================================================================
+4. DATA HANDLING
+================================================================
+
+4.1 Session Storage
+All uploaded documents and chat history are stored in memory
+only for the active browser session. No data is persisted to
+a database or retained after the session ends.
+
+4.2 API Processing
+Messages and images are sent to the OpenAI API for processing.
+Users should review OpenAI's data usage policies at
+platform.openai.com/docs/policies before submitting sensitive
+content.
+
+4.3 No Training Use
+This application does not use submitted content to train or
+fine-tune any AI model.
+
+================================================================
+5. ACCURACY DISCLAIMER
+================================================================
+
+5.1 Translation Accuracy
+AI-generated translations are provided for informational and
+general use. They should not be relied upon as the sole basis
+for legal, medical, financial, or safety-critical decisions
+without review by a qualified human translator.
+
+5.2 Image Extraction
+Text extraction from images is subject to image quality and
+script complexity. Results may be incomplete for very low-quality,
+handwritten, or highly stylised text.
+
+5.3 No Liability
+The platform operators accept no liability for decisions made
+on the basis of AI-generated translations or document summaries.
+
+================================================================
+6. ENFORCEMENT
+================================================================
+Violation of this policy may result in suspension of access to
+the service. Suspected illegal activity will be reported to the
+relevant authorities.
+
+For questions about this policy, contact the platform administrator.
+
+================================================================

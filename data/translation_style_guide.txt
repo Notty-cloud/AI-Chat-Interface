@@ -1,0 +1,141 @@
+TRANSLATION STYLE GUIDE
+AI Chat Interface — Language Services
+Version 2.1 | Last Updated: April 2026
+
+================================================================
+PURPOSE
+================================================================
+This guide defines the standards the translation assistant must
+follow when extracting, detecting, and translating content. It
+ensures consistency, accuracy, and professionalism across all
+languages supported by the platform.
+
+================================================================
+SECTION 1 — GENERAL TRANSLATION PRINCIPLES
+================================================================
+
+1.1 Accuracy First
+Translations must preserve the full meaning of the source text.
+Never paraphrase or summarise unless the user explicitly requests
+a summary. Every sentence in the original must have a corresponding
+translated sentence in the output.
+
+1.2 Preserve Tone and Register
+- Formal documents (legal, medical, academic) must be translated
+  in formal English. Do not simplify or casualise the language.
+- Informal text (social media, casual conversation) should be
+  translated naturally, preserving the conversational tone.
+- If the original uses polite/honorific forms (e.g. Japanese
+  keigo, Spanish usted), note this in the translation output.
+
+1.3 Do Not Omit Small Print
+All text in an image or document must be extracted and translated,
+including: footnotes, disclaimers, watermarks, dates, captions,
+photo credits, page numbers, and any text regardless of font size.
+Small print often contains legally or contextually important
+information.
+
+1.4 Numbers, Dates, and Proper Nouns
+- Numbers and currency values should be preserved as-is.
+- Dates should be translated to the English format (Month DD, YYYY).
+- Proper nouns (names of people, places, organisations) should
+  not be translated — keep them in their original form.
+
+1.5 Ambiguity Handling
+If a word or phrase has multiple valid translations depending on
+context, choose the most likely interpretation given the surrounding
+text. Note the ambiguity at the end of the translation if it is
+significant.
+
+================================================================
+SECTION 2 — LANGUAGE-SPECIFIC RULES
+================================================================
+
+2.1 Arabic
+- Arabic is written right-to-left. When extracting text from
+  images, read in the correct direction.
+- Classical Arabic (Fusha) and colloquial dialects (e.g. Egyptian,
+  Levantine, Gulf) differ significantly. Detect which variant is
+  being used and note it in the output.
+- Diacritical marks (tashkeel) should be used to resolve ambiguity
+  when transliterating proper nouns.
+
+2.2 Japanese
+- Japanese uses three scripts: Hiragana, Katakana, and Kanji.
+  All three must be extracted and translated.
+- Kanji compounds may have multiple readings — choose the
+  contextually appropriate one.
+- Katakana loanwords (e.g. from English) should be back-translated
+  to their English origin where identifiable.
+
+2.3 Spanish
+- Distinguish between Latin American Spanish and Castilian Spanish
+  where possible (e.g. vosotros vs. ustedes).
+- The subjunctive mood is common in formal Spanish — preserve the
+  nuance in translation rather than flattening to simple declarative.
+
+2.4 French
+- Preserve gendered nouns in translation notes where relevant.
+- French administrative and legal language is highly formal —
+  maintain equivalent formality in English.
+
+2.5 Chinese (Simplified and Traditional)
+- Note whether the source is Simplified (Mainland China) or
+  Traditional (Taiwan, Hong Kong).
+- Chengyu (four-character idioms) should be translated by meaning,
+  not character-by-character, with the original idiom noted.
+
+================================================================
+SECTION 3 — IMAGE TEXT EXTRACTION STANDARDS
+================================================================
+
+3.1 Extraction Order
+Extract text in natural reading order: top-to-bottom,
+left-to-right (or right-to-left for Arabic/Hebrew/Urdu).
+Preserve paragraph breaks and section structure.
+
+3.2 Low-Quality Images
+If an image is blurry, low-contrast, or has overlapping text,
+attempt extraction and note any uncertain sections with [unclear].
+Do not skip sections — flag them.
+
+3.3 Mixed-Language Documents
+Some documents contain text in multiple languages (e.g. a bilingual
+menu, a translated legal contract). Extract all sections and
+translate each non-English section separately, labelling the
+source language for each.
+
+================================================================
+SECTION 4 — OUTPUT FORMAT STANDARDS
+================================================================
+
+4.1 Standard Translation Output
+All translation responses must follow this structure:
+  - Detected language: [language name and variant if applicable]
+  - Original text: [full extracted text preserving structure]
+  - English translation: [complete translation]
+
+4.2 Confidence Indicators
+Where translation confidence is reduced (due to image quality,
+dialect ambiguity, or technical jargon), append a note:
+  [Note: Translation confidence reduced — [reason]]
+
+4.3 Citation
+When a translation draws on context from an uploaded document,
+cite the document filename in the response.
+
+================================================================
+SECTION 5 — WHAT THE AGENT WILL NOT TRANSLATE
+================================================================
+
+The agent will decline to translate content that:
+- Constitutes hate speech or incites violence
+- Contains personal data that could be used to identify individuals
+  without their consent
+- Is clearly watermarked as confidential or proprietary without
+  authorisation
+
+In these cases the agent should respond:
+"This content cannot be translated due to [reason]. Please contact
+support if you believe this is an error."
+================================================================
