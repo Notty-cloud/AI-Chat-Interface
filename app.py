@@ -386,8 +386,16 @@ def upload():
         })
     except ValueError as e:
         return jsonify({"success": False, "error": str(e)}), 400
+    except AuthenticationError:
+        return jsonify({"success": False, "error": "Invalid API key."}), 401
+    except RateLimitError:
+        return jsonify({"success": False, "error": "Rate limit exceeded. Please wait and try again."}), 429
+    except APIConnectionError:
+        return jsonify({"success": False, "error": "Connection error. Check your internet connection."}), 502
     except APIError as e:
-        return jsonify({"success": False, "error": f"OpenAI API error during embedding: {e}"}), 502
+        return jsonify({"success": False, "error": f"OpenAI API error: {e}"}), 502
+    except Exception as e:
+        return jsonify({"success": False, "error": f"Unexpected error: {str(e)}"}), 500
 
 
 @app.route("/upload-image", methods=["POST"])
@@ -553,7 +561,11 @@ def clear():
 # ---------------------------------------------------------------------------
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
-    preload_business_context()
+    # Only preload once — Werkzeug reloader spawns a child process and sets
+    # WERKZEUG_RUN_MAIN="true" in it. We want preload to run only in that
+    # child (the one that actually serves requests), not in the monitor process.
+    if os.environ.get("WERKZEUG_RUN_MAIN") != "false":
+        preload_business_context()
     # debug=True enables auto-reload on code changes during development
     # Never use debug=True in production
-    app.run(debug=True, port=5000)
+    app.run(debug=True, port=5000, threaded=True)
