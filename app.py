@@ -374,9 +374,8 @@ def upload():
             "error": f"File type '.{ext}' not supported. Use .pdf, .txt, .md, .jpg, .jpeg, .png, or .webp"
         }), 400
 
-    file_bytes = file.read()
-
     try:
+        file_bytes = file.read()
         result = rag.add_document(file_bytes, file.filename, client)
         return jsonify({
             "success": True,
@@ -564,8 +563,9 @@ if __name__ == "__main__":
     # Only preload once — Werkzeug reloader spawns a child process and sets
     # WERKZEUG_RUN_MAIN="true" in it. We want preload to run only in that
     # child (the one that actually serves requests), not in the monitor process.
-    if os.environ.get("WERKZEUG_RUN_MAIN") != "false":
-        preload_business_context()
-    # debug=True enables auto-reload on code changes during development
-    # Never use debug=True in production
-    app.run(debug=True, port=5000, threaded=True)
+    preload_business_context()
+    # use_reloader=False prevents Werkzeug from spawning a second process that
+    # would run preload_business_context() again and make 4 duplicate API calls.
+    # Restart the server manually after code changes during development.
+    # Never use debug=True in production.
+    app.run(debug=True, port=5000, threaded=True, use_reloader=False)
