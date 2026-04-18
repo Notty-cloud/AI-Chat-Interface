@@ -20,6 +20,7 @@ import base64
 import json
 import logging
 import os
+import pickle
 from datetime import date
 from pathlib import Path
 
@@ -45,23 +46,64 @@ logger = logging.getLogger(__name__)
 client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
 
 
+_CACHE_PATH = Path(__file__).parent / "data" / ".rag_cache.pkl"
+
+
 def preload_business_context():
     """
-    Auto-index all .txt and .md files in the data/ folder into the RAG
-    pipeline at startup. This gives the agent permanent access to the
-    translation style guide, language support matrix, usage policy, and
-    performance metrics without requiring manual uploads each session.
+    Auto-index all .txt files in the data/ folder into the RAG pipeline.
+
+    Embeddings are cached to data/.rag_cache.pkl keyed by filename + mtime.
+    On subsequent restarts, unchanged files are restored from disk in
+    milliseconds with zero API calls. Only files that have changed (or are
+    new) trigger an embedding call.
     """
     data_dir = Path(__file__).parent / "data"
     if not data_dir.exists():
         return
-    for path in sorted(data_dir.glob("*.txt")) :
+
+    # Load existing cache from disk (ignore corrupt/missing cache silently)
+    cache: dict = {}
+    if _CACHE_PATH.exists():
         try:
-            file_bytes = path.read_bytes()
-            result = rag.add_document(file_bytes, path.name, client)
-            logger.info("Preloaded '%s' — %d chunks", path.name, result["chunks_added"])
+            with open(_CACHE_PATH, "rb") as f:
+                cache = pickle.load(f)
+        except Exception:
+            cache = {}
+
+    cache_updated = False
+
+    for path in sorted(data_dir.glob("*.txt")):
+        mtime = path.stat().st_mtime
+        cached = cache.get(path.name)
+
+        if cached and cached.get("mtime") == mtime:
+            # File unchanged — restore directly from cache (no API call)
+            for entry in cached["entries"]:
+                rag.document_store.append(entry)
+            logger.info(
+                "Preloaded '%s' from cache — %d chunks", path.name, len(cached["entries"])
+            )
+        else:
+            # File is new or modified — embed and update cache
+            try:
+                file_bytes = path.read_bytes()
+                result = rag.add_document(file_bytes, path.name, client)
+                logger.info("Preloaded '%s' — %d chunks", path.name, result["chunks_added"])
+                # Capture the entries just added so we can persist them
+                entries = [e for e in rag.document_store if e["filename"] == path.name]
+                cache[path.name] = {"mtime": mtime, "entries": entries}
+                cache_updated = True
+            except Exception as e:
+                logger.warning("Failed to preload '%s': %s", path.name, e)
+
+    if cache_updated:
+        try:
+            with open(_CACHE_PATH, "wb") as f:
+                pickle.dump(cache, f)
+            logger.info("Embedding cache saved to %s", _CACHE_PATH)
         except Exception as e:
-            logger.warning("Failed to preload '%s': %s", path.name, e)
+            logger.warning("Failed to save embedding cache: %s", e)
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -224,15 +266,23 @@ def chat():
         except (TypeError, ValueError):
             max_tokens = None
 
-    # Fix 2: scale RAG top_k with query complexity
-    # Short queries (< 60 chars) need at most 1 chunk; longer queries up to 3
+    # Scale RAG top_k with query complexity
     word_count = len(user_message.split())
     top_k = 1 if word_count <= 8 else (2 if word_count <= 20 else 3)
 
-    # Run the decision tree: classify → select tools → retrieve context
-    rag_chunks  = rag.retrieve_relevant_chunks(user_message, client, top_k=top_k)
-    routing_ctx = agent.route_request(user_message, rag_chunks, client)
-    messages    = build_messages(user_message, routing_ctx)
+    # Classify first (fast, ~10 tokens, temperature=0).
+    # external_research queries need live web data — skip the RAG embedding
+    # call entirely (saves one embeddings API call on ~31% of queries).
+    classification = agent.classify_query(user_message, client)
+    if classification != "external_research":
+        rag_chunks = rag.retrieve_relevant_chunks(user_message, client, top_k=top_k)
+    else:
+        rag_chunks = []
+
+    routing_ctx = agent.route_request(
+        user_message, rag_chunks, client, classification=classification
+    )
+    messages = build_messages(user_message, routing_ctx)
 
     def generate():
         """Generator that yields SSE-formatted chunks as they stream from OpenAI."""
@@ -245,8 +295,8 @@ def chat():
                 "temperature": temperature,
                 "stream_options": {"include_usage": True},
             }
-            if max_tokens:
-                api_kwargs["max_tokens"] = max_tokens
+            # Default to 1024 to cap runaway responses; user can override via settings
+            api_kwargs["max_tokens"] = max_tokens or 1024
 
             stream = client.chat.completions.create(**api_kwargs)
             usage_data = None

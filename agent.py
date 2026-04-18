@@ -141,7 +141,12 @@ def build_web_context(results: list[dict]) -> str:
 # ---------------------------------------------------------------------------
 # Step 4 — Route Request (full decision tree)
 # ---------------------------------------------------------------------------
-def route_request(query: str, rag_chunks: list[dict], client: OpenAI) -> dict:
+def route_request(
+    query: str,
+    rag_chunks: list[dict],
+    client: OpenAI,
+    classification: str = None,
+) -> dict:
     """
     Run the full decision tree for a query.
 
@@ -149,6 +154,10 @@ def route_request(query: str, rag_chunks: list[dict], client: OpenAI) -> dict:
       external_research → web only (skip RAG)
       policy_lookup     → RAG only (no web fallback)
       all others        → RAG first; web if RAG insufficient
+
+    `classification` may be passed in pre-computed (from app.py) so the
+    classify API call is not duplicated when the caller already classified
+    the query in order to decide whether to skip RAG retrieval.
 
     Returns a context dict:
       {
@@ -159,7 +168,8 @@ def route_request(query: str, rag_chunks: list[dict], client: OpenAI) -> dict:
         tools_used     : list[str],
       }
     """
-    classification = classify_query(query, client)
+    if classification is None:
+        classification = classify_query(query, client)
     web_results: list[dict] = []
     tools_used:  list[str]  = []
 
