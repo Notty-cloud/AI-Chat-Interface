@@ -648,7 +648,8 @@
   // -----------------------------------------------------------------------
   // State
   // -----------------------------------------------------------------------
-  let isStreaming = false;   // prevents sending a new message while one is in progress
+  let isStreaming = false;         // prevents sending a new message while one is in progress
+  let conversationHistory = [];   // client owns history — sent with every /chat request
 
   // -----------------------------------------------------------------------
   // SEND MESSAGE — core chat function
@@ -687,6 +688,7 @@
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           message:     text,
+          history:     conversationHistory,   // client sends its own history
           model:       modelSelect.value,
           temperature: parseFloat(tempSlider.value),
           max_tokens:  maxTokensInput.value ? parseInt(maxTokensInput.value) : null,
@@ -706,6 +708,7 @@
       const reader  = response.body.getReader();
       const decoder = new TextDecoder();
       let   buffer  = "";
+      let   fullResponseText = "";   // accumulate for history
 
       typingIndicator.style.display = "none";
 
@@ -729,9 +732,18 @@
           catch { continue; }
 
           if (event.delta) {
+            fullResponseText += event.delta;
             bodyEl.textContent += event.delta;
             scrollToBottom();
           } else if (event.done) {
+            // Update client history and persist to server for page-refresh restore
+            conversationHistory.push({ role: "user",      content: text });
+            conversationHistory.push({ role: "assistant", content: fullResponseText });
+            fetch("/save-history", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ history: conversationHistory }),
+            }).catch(() => {});  // fire-and-forget
             // Token usage
             if (event.usage) {
               const u = event.usage;
@@ -905,11 +917,13 @@
       const history  = await response.json();
 
       if (history.length > 0) {
+        // Restore both the UI and the client-side history array
+        conversationHistory = history.filter(
+          m => m.role === "user" || m.role === "assistant"
+        );
         if (emptyState) emptyState.remove();
-        for (const msg of history) {
-          if (msg.role === "user" || msg.role === "assistant") {
-            appendMessage(msg.role, msg.content);
-          }
+        for (const msg of conversationHistory) {
+          appendMessage(msg.role, msg.content);
         }
       }
     } catch (err) {
@@ -1086,6 +1100,8 @@
     } catch (err) {
       console.error("Clear failed:", err);
     }
+
+    conversationHistory = [];   // reset client-side history
 
     // Reset UI
     messageThread.innerHTML = "";

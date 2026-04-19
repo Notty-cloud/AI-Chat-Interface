@@ -21,7 +21,6 @@ import json
 import logging
 import os
 import pickle
-import uuid
 from datetime import date
 from pathlib import Path
 
@@ -45,37 +44,6 @@ app.config["MAX_CONTENT_LENGTH"] = 10 * 1024 * 1024  # 10 MB upload limit
 
 logger = logging.getLogger(__name__)
 client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
-
-# ---------------------------------------------------------------------------
-# Server-side chat history
-# ---------------------------------------------------------------------------
-# Flask's cookie-based session cannot be updated inside a streaming SSE
-# generator — the Set-Cookie header is sent to the browser before the
-# generator runs, so any writes to session["history"] inside generate()
-# are silently discarded. The next request arrives with the old cookie and
-# the agent appears to forget everything.
-#
-# Fix: store history in a server-side dict keyed by a UUID session ID.
-# Only the tiny UUID lives in the cookie; the actual message list never
-# touches it. Generator writes update the dict immediately and are visible
-# on the very next request.
-_chat_histories: dict[str, list] = {}
-
-
-def _get_sid() -> str:
-    """Return the session's unique ID, creating one if this is a new session."""
-    if "sid" not in session:
-        session["sid"] = str(uuid.uuid4())
-        session.modified = True
-    return session["sid"]
-
-
-def _get_history() -> list:
-    return _chat_histories.get(_get_sid(), [])
-
-
-def _save_history(history: list) -> None:
-    _chat_histories[_get_sid()] = history
 
 
 _CACHE_PATH = Path(__file__).parent / "data" / ".rag_cache.pkl"
@@ -198,16 +166,14 @@ def get_system_prompt_base(user_message: str = "") -> str:
 # ---------------------------------------------------------------------------
 # Helper — Build the messages list for each API call
 # ---------------------------------------------------------------------------
-def build_messages(user_message: str, routing_ctx: dict) -> list[dict]:
+def build_messages(user_message: str, routing_ctx: dict, history: list) -> list[dict]:
     """
     Assemble the full messages list to send to the chat completions API.
 
     Structure:
-      [system_message, ...trimmed_history..., new_user_message]
+      [system_message, ...history..., new_user_message]
 
-    The system message is built fresh each request and may include:
-      - RAG context (<context> block) when internal docs are relevant
-      - Web search results (<web_search> block) when web fallback was triggered
+    history is supplied by the caller (the client owns conversation state).
     """
     base = get_system_prompt_base(user_message)
 
@@ -231,12 +197,10 @@ def build_messages(user_message: str, routing_ctx: dict) -> list[dict]:
 
     system_message = {"role": "system", "content": system_content}
 
-    # 3. Get stored history, trim to cap
-    history = _get_history()
+    # Safety trim
     if len(history) > MAX_HISTORY_MESSAGES:
         history = history[-MAX_HISTORY_MESSAGES:]
 
-    # 4. Assemble: system + history + new user message
     return [system_message] + history + [{"role": "user", "content": user_message}]
 
 
@@ -246,8 +210,7 @@ def build_messages(user_message: str, routing_ctx: dict) -> list[dict]:
 
 @app.route("/")
 def index():
-    """Serve the chat UI. Ensure a session ID exists for this browser session."""
-    _get_sid()  # creates + saves the UUID to the cookie on first visit
+    """Serve the chat UI."""
     return render_template("index.html")
 
 
@@ -310,10 +273,24 @@ def chat():
     else:
         rag_chunks = []
 
+    # History is owned by the client and sent with every request.
+    # This avoids the Flask SSE session bug entirely: the Set-Cookie header
+    # is sent before the generator runs, so server-side session writes inside
+    # generate() are always lost. Client-side state is reliable.
+    raw_history = data.get("history", [])
+    if not isinstance(raw_history, list):
+        raw_history = []
+    history = [
+        m for m in raw_history
+        if isinstance(m, dict)
+        and m.get("role") in ("user", "assistant")
+        and isinstance(m.get("content"), str)
+    ]
+
     routing_ctx = agent.route_request(
         user_message, rag_chunks, client, classification=classification
     )
-    messages = build_messages(user_message, routing_ctx)
+    messages = build_messages(user_message, routing_ctx, history)
 
     def generate():
         """Generator that yields SSE-formatted chunks as they stream from OpenAI."""
@@ -370,53 +347,8 @@ def chat():
             yield f"data: {json.dumps({'error': str(e)})}\n\n"
             return
 
-        # Save the completed exchange to server-side history.
-        # (Cannot use session here — Set-Cookie was already sent before the
-        # generator started, so session writes inside generate() are lost.)
-        full_text = "".join(full_response)
-        history   = _get_history()
-        history.append({"role": "user",      "content": user_message})
-        history.append({"role": "assistant", "content": full_text})
-
-        # Fix 4: when history exceeds the cap, summarise the oldest half
-        # into a single compact assistant message instead of just dropping it.
-        # This preserves context while dramatically reducing token count.
-        if len(history) > MAX_HISTORY_MESSAGES:
-            half       = len(history) // 2
-            to_summarise = history[:half]
-            recent       = history[half:]
-            try:
-                summary_resp = client.chat.completions.create(
-                    model="gpt-4.1-mini",
-                    messages=[
-                        {
-                            "role": "system",
-                            "content": (
-                                "Summarise the following conversation in 3-5 sentences, "
-                                "preserving all key facts, decisions, and topics discussed. "
-                                "Be concise — this summary replaces the full history to save tokens."
-                            ),
-                        },
-                        {
-                            "role": "user",
-                            "content": "\n".join(
-                                f"{m['role'].upper()}: {m['content']}"
-                                for m in to_summarise
-                            ),
-                        },
-                    ],
-                    max_tokens=200,
-                    temperature=0,
-                )
-                summary_text = summary_resp.choices[0].message.content.strip()
-                history = [
-                    {"role": "assistant", "content": f"[Earlier conversation summary]: {summary_text}"}
-                ] + recent
-            except Exception:
-                # If summarisation fails, fall back to simple trim
-                history = history[-MAX_HISTORY_MESSAGES:]
-
-        _save_history(history)
+        # History is saved by the client via POST /save-history after streaming
+        # completes. Nothing to do here.
 
     return Response(
         stream_with_context(generate()),
@@ -583,8 +515,9 @@ def upload_image():
                                       next_labels=["English translation"])
     translation       = extract_field("English translation", raw)
 
-    # Save to history so follow-up chat questions have context
-    history = _get_history()
+    # Save to session history so follow-up chat questions have context.
+    # upload_image is a normal (non-streaming) request so session saves correctly.
+    history = session.get("history", [])
     assistant_summary = (
         f"[Image Translation Result]\n"
         f"Detected language: {detected_language}\n"
@@ -595,7 +528,8 @@ def upload_image():
     history.append({"role": "assistant", "content": assistant_summary})
     if len(history) > MAX_HISTORY_MESSAGES:
         history = history[-MAX_HISTORY_MESSAGES:]
-    _save_history(history)
+    session["history"] = history
+    session.modified = True
 
     return jsonify({
         "success":            True,
@@ -603,6 +537,32 @@ def upload_image():
         "original_text":      original_text,
         "translation":        translation,
     })
+
+
+@app.route("/save-history", methods=["POST"])
+def save_history():
+    """
+    Persist the client-side conversation history to the server session.
+
+    Called by the frontend after each completed exchange so the history
+    survives a page refresh. Uses a normal (non-streaming) request so the
+    session cookie is saved correctly — no SSE timing issues.
+    """
+    data = request.get_json(silent=True) or {}
+    raw = data.get("history", [])
+    if not isinstance(raw, list):
+        return jsonify({"success": False, "error": "history must be an array"}), 400
+    history = [
+        m for m in raw
+        if isinstance(m, dict)
+        and m.get("role") in ("user", "assistant")
+        and isinstance(m.get("content"), str)
+    ]
+    if len(history) > MAX_HISTORY_MESSAGES:
+        history = history[-MAX_HISTORY_MESSAGES:]
+    session["history"] = history
+    session.modified = True
+    return jsonify({"success": True})
 
 
 @app.route("/models")
@@ -624,13 +584,14 @@ def history():
     Called by the frontend on page load to restore the chat thread
     after a browser refresh.
     """
-    return jsonify(_get_history())
+    return jsonify(session.get("history", []))
 
 
 @app.route("/clear", methods=["POST"])
 def clear():
     """Reset both the chat history and the in-memory document store."""
-    _save_history([])
+    session["history"] = []
+    session.modified = True
     rag.clear_documents()
     return jsonify({"success": True})
 
