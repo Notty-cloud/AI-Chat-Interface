@@ -497,6 +497,60 @@
     ::-webkit-scrollbar-track { background: transparent; }
     ::-webkit-scrollbar-thumb { background: #d4d4d8; border-radius: 3px; }
     ::-webkit-scrollbar-thumb:hover { background: #a1a1aa; }
+
+    /* =====================================================================
+       TOOL ACTIVITY CHIPS
+       Shown inside the assistant bubble while file tools are executing.
+       Appears above the response text so the user sees live progress.
+       ===================================================================== */
+    .tool-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      font-size: 11px;
+      font-weight: 500;
+      padding: 4px 9px;
+      border-radius: 6px;
+      margin-bottom: 6px;
+      white-space: nowrap;
+      max-width: 100%;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    /* While the tool is executing — pulsing amber */
+    .tool-chip--calling {
+      background: #fef3c7;
+      color: #92400e;
+      border: 1px solid #fcd34d;
+      animation: pulse-chip 1.4s ease-in-out infinite;
+    }
+    @keyframes pulse-chip {
+      0%, 100% { opacity: 1; }
+      50%       { opacity: 0.55; }
+    }
+    /* After the tool returns — solid green */
+    .tool-chip--done {
+      background: #dcfce7;
+      color: #15803d;
+      border: 1px solid #86efac;
+      animation: none;
+    }
+    .tool-chip-icon { font-style: normal; flex-shrink: 0; }
+    .tool-chip-name { font-weight: 700; flex-shrink: 0; }
+    .tool-chip-args {
+      color: inherit;
+      opacity: 0.7;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    /* File-tool badge in the agent-meta footer */
+    .tag-file-tool {
+      background: #ede9fe;
+      color: #5b21b6;
+      border: 1px solid #c4b5fd;
+    }
   </style>
 </head>
 
@@ -732,11 +786,45 @@
           catch { continue; }
 
           if (event.delta) {
+            // Regular text token — append to the bubble
             fullResponseText += event.delta;
             bodyEl.textContent += event.delta;
             scrollToBottom();
+
+          } else if (event.tool_call) {
+            // Agent is calling a file tool — show a live activity chip
+            typingIndicator.style.display = "none";
+            const tc = event.tool_call;
+            const chip = document.createElement("div");
+            chip.className   = "tool-chip tool-chip--calling";
+            chip.dataset.id  = tc.id;
+            // Summarise arguments so the user sees what the tool is doing
+            const argSummary = Object.entries(tc.args || {})
+              .map(([k, v]) => `${k}=${JSON.stringify(v)}`)
+              .join(", ");
+            chip.innerHTML =
+              `<span class="tool-chip-icon">⚙</span>` +
+              `<span class="tool-chip-name">${tc.name}</span>` +
+              `<span class="tool-chip-args">(${argSummary || "…"})</span>`;
+            // Insert before bodyEl so tool activity sits above the response text
+            assistantBubble.querySelector(".message-body").before(chip);
+            scrollToBottom();
+
+          } else if (event.tool_result) {
+            // Tool finished — update the chip to show completion + preview
+            const tr  = event.tool_result;
+            const chip = assistantBubble.querySelector(`.tool-chip[data-id="${tr.id}"]`);
+            if (chip) {
+              chip.classList.remove("tool-chip--calling");
+              chip.classList.add("tool-chip--done");
+              // Replace the spinning icon with a checkmark
+              const icon = chip.querySelector(".tool-chip-icon");
+              if (icon) icon.textContent = "✓";
+            }
+            scrollToBottom();
+
           } else if (event.done) {
-            // Update client history and persist to server for page-refresh restore
+            // Stream complete — save history, render metadata badges
             conversationHistory.push({ role: "user",      content: text });
             conversationHistory.push({ role: "assistant", content: fullResponseText });
             fetch("/save-history", {
@@ -744,7 +832,8 @@
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify({ history: conversationHistory }),
             }).catch(() => {});  // fire-and-forget
-            // Token usage
+
+            // Token usage footer
             if (event.usage) {
               const u = event.usage;
               const usageEl = document.createElement("div");
@@ -753,25 +842,27 @@
                 `${u.total_tokens} tokens (${u.prompt_tokens} prompt + ${u.completion_tokens} response)`;
               assistantBubble.appendChild(usageEl);
             }
-            // Agent routing badges
+
+            // Agent routing + file-tool badges
             const metaEl = document.createElement("div");
             metaEl.className = "agent-meta";
-            // Classification tag
             if (event.classification) {
               const cls = document.createElement("span");
-              cls.className = "agent-tag tag-class";
+              cls.className   = "agent-tag tag-class";
               cls.textContent = event.classification.replace(/_/g, " ");
               metaEl.appendChild(cls);
             }
-            // Tool tags
             (event.tools_used || []).forEach(tool => {
               const t = document.createElement("span");
-              t.className = `agent-tag ${tool === "rag" ? "tag-rag" : "tag-web"}`;
-              t.textContent = tool === "rag" ? "RAG" : "Web Search";
+              // Distinguish file tools from routing tools
+              const isFileTool = ["list_files","read_file","search_files","write_file"].includes(tool);
+              t.className   = `agent-tag ${isFileTool ? "tag-file-tool" : tool === "rag" ? "tag-rag" : "tag-web"}`;
+              t.textContent = isFileTool ? `🗂 ${tool.replace(/_/g," ")}` : tool === "rag" ? "RAG" : "Web Search";
               metaEl.appendChild(t);
             });
             if (metaEl.children.length) assistantBubble.appendChild(metaEl);
             break;
+
           } else if (event.error) {
             bodyEl.textContent = `Error: ${event.error}`;
             bodyEl.style.color = "#dc2626";

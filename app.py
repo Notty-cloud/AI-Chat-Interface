@@ -30,7 +30,7 @@ from flask import (Flask, Response, jsonify, render_template,
 from openai import APIConnectionError, APIError, AuthenticationError, OpenAI, RateLimitError
 
 import agent
-from agent import build_web_context
+from agent import build_web_context, run_agent_loop
 import rag
 
 # ---------------------------------------------------------------------------
@@ -104,6 +104,10 @@ def preload_business_context():
             logger.info("Embedding cache saved to %s", _CACHE_PATH)
         except Exception as e:
             logger.warning("Failed to save embedding cache: %s", e)
+
+# Run once at import time so preloaded docs are available regardless of how
+# the server is started (python app.py, flask run, gunicorn, etc.)
+preload_business_context()
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -293,47 +297,27 @@ def chat():
     messages = build_messages(user_message, routing_ctx, history)
 
     def generate():
-        """Generator that yields SSE-formatted chunks as they stream from OpenAI."""
-        full_response = []
+        """
+        Generator that yields SSE events for the full agent turn.
+
+        Delegates to run_agent_loop(), which:
+          - Streams delta events token-by-token when the model answers directly
+          - Yields tool_call / tool_result events when the model uses file tools
+          - Loops until the model produces a final text answer
+
+        result_holder[0] is populated by run_agent_loop() before the final
+        "done" event so the caller can read the full response text.
+        """
+        result_holder: list[dict] = [{}]
         try:
-            api_kwargs = {
-                "model": model,
-                "messages": messages,
-                "stream": True,
-                "temperature": temperature,
-                "stream_options": {"include_usage": True},
-            }
-            # Default to 1024 to cap runaway responses; user can override via settings
-            api_kwargs["max_tokens"] = max_tokens or 1024
-
-            stream = client.chat.completions.create(**api_kwargs)
-            usage_data = None
-            for chunk in stream:
-                # Final chunk with stream_options usage has empty choices
-                if chunk.usage:
-                    usage_data = {
-                        "prompt_tokens":     chunk.usage.prompt_tokens,
-                        "completion_tokens": chunk.usage.completion_tokens,
-                        "total_tokens":      chunk.usage.total_tokens,
-                    }
-                if not chunk.choices:
-                    continue
-                delta = chunk.choices[0].delta
-                if delta.content:
-                    full_response.append(delta.content)
-                    payload = json.dumps({"delta": delta.content})
-                    yield f"data: {payload}\n\n"
-
-            # Signal that streaming is complete
-            done_payload = {
-                "done":           True,
-                "classification": routing_ctx.get("classification", "general_inquiry"),
-                "tools_used":     routing_ctx.get("tools_used", []),
-            }
-            if usage_data:
-                done_payload["usage"] = usage_data
-            yield f"data: {json.dumps(done_payload)}\n\n"
-
+            yield from run_agent_loop(
+                messages      = messages,
+                client        = client,
+                model         = model,
+                temperature   = temperature,
+                max_tokens    = max_tokens or 1024,
+                result_holder = result_holder,
+            )
         except AuthenticationError:
             yield f"data: {json.dumps({'error': 'Invalid API key. Check your OPENAI_API_KEY.'})}\n\n"
             return
@@ -390,6 +374,14 @@ def upload():
 
     try:
         file_bytes = file.read()
+
+        # Persist the file to data/ so it survives server restarts and is
+        # picked up by preload_business_context() on the next startup.
+        data_dir = Path(__file__).parent / "data"
+        data_dir.mkdir(exist_ok=True)
+        save_path = data_dir / file.filename
+        save_path.write_bytes(file_bytes)
+
         result = rag.add_document(file_bytes, file.filename, client)
         return jsonify({
             "success": True,
@@ -601,12 +593,7 @@ def clear():
 # ---------------------------------------------------------------------------
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
-    # Only preload once — Werkzeug reloader spawns a child process and sets
-    # WERKZEUG_RUN_MAIN="true" in it. We want preload to run only in that
-    # child (the one that actually serves requests), not in the monitor process.
-    preload_business_context()
-    # use_reloader=False prevents Werkzeug from spawning a second process that
-    # would run preload_business_context() again and make 4 duplicate API calls.
-    # Restart the server manually after code changes during development.
-    # Never use debug=True in production.
+    # preload_business_context() already ran at import time above.
+    # use_reloader=False avoids a second process that would re-run preload
+    # and make duplicate embedding API calls during development.
     app.run(debug=True, port=5000, threaded=True, use_reloader=False)
